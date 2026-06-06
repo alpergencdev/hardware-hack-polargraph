@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Painter UI</title>
+<style>
+  :root { --bg:#0e1116; --panel:#171c24; --line:#2a313c; --ink:#e6edf3;
+          --muted:#8b97a7; --accent:#4da3ff; --pen:#36d399; --travel:#5a6473; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,sans-serif; background:var(--bg);
+         color:var(--ink); display:flex; height:100vh; overflow:hidden; }
+  .side { width:340px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+          padding:16px; overflow:auto; display:flex; flex-direction:column; gap:14px; }
+  .stage { flex:1; display:flex; flex-direction:column; min-width:0; }
+  h1 { font-size:15px; margin:0 0 2px; letter-spacing:.3px; }
+  .sub { color:var(--muted); font-size:12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  textarea { width:100%; height:120px; resize:vertical; background:#0b0e13; color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:8px; font:12px/1.4 monospace; }
+  .row { display:flex; gap:10px; }
+  .row > div { flex:1; }
+  input[type=number] { width:100%; background:#0b0e13; color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:7px 8px; }
+  .checks { display:flex; gap:16px; align-items:center; }
+  .checks label { display:flex; gap:6px; align-items:center; margin:0; color:var(--ink); cursor:pointer; }
+  button { border:0; border-radius:8px; padding:9px 12px; font-weight:600; cursor:pointer; }
+  .primary { background:var(--accent); color:#02101f; }
+  .ghost { background:#222a35; color:var(--ink); }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
+  .drop { border:1.5px dashed var(--line); border-radius:10px; padding:14px; text-align:center;
+          color:var(--muted); cursor:pointer; transition:.15s; }
+  .drop.hot { border-color:var(--accent); color:var(--accent); background:#0b1622; }
+  .toolbar { display:flex; gap:12px; align-items:center; padding:10px 14px;
+             border-bottom:1px solid var(--line); background:var(--panel); }
+  .toolbar input[type=range] { width:120px; }
+  .spacer { flex:1; }
+  canvas { flex:1; width:100%; background:#0b0e13; display:block; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--muted); }
+  .dot { display:inline-block; width:10px; height:3px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+  .stat { font-size:12px; color:var(--muted); white-space:pre-wrap; }
+  .err { color:#ff6b6b; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  pre { margin:6px 0 0; max-height:160px; overflow:auto; background:#0b0e13;
+        border:1px solid var(--line); border-radius:8px; padding:8px; font-size:11px; }
+</style>
+</head>
+<body>
+  <div class="side">
+    <div>
+      <h1>Painter UI</h1>
+      <div class="sub">SVG → ./painter → animated strokes</div>
+    </div>
+
+    <div class="drop" id="drop">Drop an .svg here, or click to choose</div>
+    <input type="file" id="file" accept=".svg,image/svg+xml" hidden />
+
+    <div>
+      <label>SVG source</label>
+      <textarea id="svg" placeholder="&lt;svg ...&gt;...&lt;/svg&gt;"></textarea>
+    </div>
+
+    <div class="row">
+      <div><label>Width</label><input type="number" id="w" value="600" min="1" /></div>
+      <div><label>Height</label><input type="number" id="h" value="400" min="1" /></div>
+    </div>
+
+    <div class="checks">
+      <label><input type="checkbox" id="fit" checked /> Keep aspect (fit)</label>
+      <label><input type="checkbox" id="flip" /> Flip Y</label>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="run">Run painter ▶</button>
+      <button class="ghost" id="sample">Load sample</button>
+      <button class="ghost" id="replay">Replay</button>
+    </div>
+
+    <div class="stat" id="stat"></div>
+    <details>
+      <summary>painter log</summary>
+      <pre id="log"></pre>
+    </details>
+  </div>
+
+  <div class="stage">
+    <div class="toolbar">
+      <div class="legend">
+        <span><span class="dot" style="background:var(--pen)"></span>pen down (draw)</span>
+        <span><span class="dot" style="background:var(--travel)"></span>pen up (travel)</span>
+      </div>
+      <div class="spacer"></div>
+      <label style="margin:0;color:var(--muted)">speed</label>
+      <input type="range" id="speed" min="1" max="100" value="55" />
+      <label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--ink)">
+        <input type="checkbox" id="showtravel" checked /> show travel
+      </label>
+    </div>
+    <canvas id="cv"></canvas>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let polylines = [];        // [[ [x,y], ... ], ...]
+let lastBox = {w:600,h:400};
+let anim = null;
+
+const SAMPLE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="12" y="12" width="76" height="76" rx="6"/>
+  <circle cx="50" cy="50" r="26"/>
+  <path d="M30 50 Q50 20 70 50 T30 50 Z"/>
+  <line x1="12" y1="12" x2="88" y2="88"/>
+</svg>`;
+
+function fitCanvas() {
+  const r = cv.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.floor(r.width * dpr));
+  cv.height = Math.max(1, Math.floor(r.height * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  redrawStatic();
+}
+window.addEventListener('resize', fitCanvas);
+
+// Map painter coords (0..boxW, 0..boxH) into the canvas, letterboxed & centered.
+function transform() {
+  const r = cv.getBoundingClientRect();
+  const pad = 24;
+  const sw = r.width - pad*2, sh = r.height - pad*2;
+  const s = Math.min(sw / lastBox.w, sh / lastBox.h);
+  const ox = pad + (sw - lastBox.w*s)/2;
+  const oy = pad + (sh - lastBox.h*s)/2;
+  return p => [ox + p[0]*s, oy + p[1]*s];
+}
+
+function drawFrame() {
+  const r = cv.getBoundingClientRect();
+  ctx.clearRect(0,0,r.width,r.height);
+  // box outline
+  const T = transform();
+  const a = T([0,0]), b = T([lastBox.w,lastBox.h]);
+  ctx.strokeStyle = '#202833'; ctx.lineWidth = 1;
+  ctx.strokeRect(a[0], a[1], b[0]-a[0], b[1]-a[1]);
+}
+
+function redrawStatic() {
+  drawFrame();
+  if (!polylines.length) return;
+  const T = transform();
+  const showTravel = $('showtravel').checked;
+  let prevEnd = null;
+  for (const pl of polylines) {
+    if (pl.length < 2) continue;
+    if (showTravel && prevEnd) {
+      ctx.strokeStyle = '#5a6473';
+      ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+      ctx.beginPath();
+      const s = T(prevEnd), e = T(pl[0]);
+      ctx.moveTo(s[0],s[1]); ctx.lineTo(e[0],e[1]); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = '#36d399'; ctx.lineWidth = 2;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    const p0 = T(pl[0]); ctx.moveTo(p0[0], p0[1]);
+    for (let i=1;i<pl.length;i++){ const p=T(pl[i]); ctx.lineTo(p[0],p[1]); }
+    ctx.stroke();
+    prevEnd = pl[pl.length-1];
+  }
+}
+
+// Animated playback: travel (pen up) then draw (pen down) per polyline.
+function play() {
+  if (anim) cancelAnimationFrame(anim);
+  if (!polylines.length) return;
+  const T = transform();
+  const showTravel = () => $('showtravel').checked;
+  // Flatten into timed segments.
+  const segs = [];
+  let prevEnd = null;
+  for (const pl of polylines) {
+    if (pl.length < 2) continue;
+    if (prevEnd) segs.push({type:'travel', a:prevEnd, b:pl[0]});
+    for (let i=1;i<pl.length;i++) segs.push({type:'draw', a:pl[i-1], b:pl[i]});
+    prevEnd = pl[pl.length-1];
+  }
+  let idx = 0, t = 0;
+  const drawn = []; // committed segments to keep on screen
+
+  function step() {
+    const speed = +$('speed').value;          // 1..100
+    t += 0.02 + speed/120;                     // progress per frame
+    drawFrame();
+    // committed
+    for (const sg of drawn) paintSeg(T, sg, 1, true);
+    if (idx < segs.length) {
+      const sg = segs[idx];
+      paintSeg(T, sg, Math.min(t,1), false);
+      if (t >= 1) { drawn.push(sg); idx++; t = 0; }
+      anim = requestAnimationFrame(step);
+    } else {
+      anim = null;
+    }
+  }
+
+  function paintSeg(T, sg, frac, committed) {
+    if (sg.type === 'travel') {
+      if (!showTravel()) return;
+      ctx.strokeStyle = '#5a6473'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+    } else {
+      ctx.strokeStyle = committed ? '#36d399' : '#7df0bb';
+      ctx.lineWidth = 2; ctx.setLineDash([]); ctx.lineCap='round'; ctx.lineJoin='round';
+    }
+    const a = T(sg.a);
+    const b = T([sg.a[0]+(sg.b[0]-sg.a[0])*frac, sg.a[1]+(sg.b[1]-sg.a[1])*frac]);
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  step();
+}
+
+async function run() {
+  const svg = $('svg').value.trim();
+  if (!svg) { setErr('Paste or drop an SVG first.'); return; }
+  const width = +$('w').value, height = +$('h').value;
+  $('stat').textContent = 'running painter…'; $('stat').className='stat';
+  try {
+    const res = await fetch('/paint', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({svg, width, height, fit:$('fit').checked, flipY:$('flip').checked})
+    });
+    const data = await res.json();
+    if (data.error) { setErr(data.error); $('log').textContent=''; return; }
+    polylines = data.polylines || [];
+    lastBox = {w:width, h:height};
+    $('log').textContent = data.log || '';
+    const pts = polylines.reduce((n,p)=>n+p.length,0);
+    $('stat').className='stat';
+    $('stat').textContent = `${polylines.length} polylines · ${pts} points · box ${width}×${height}`;
+    play();
+  } catch (e) { setErr(String(e)); }
+}
+
+function setErr(msg){ $('stat').className='stat err'; $('stat').textContent = msg; }
+
+// ---- file / drag-drop wiring ----
+function loadFile(file){
+  const reader = new FileReader();
+  reader.onload = () => { $('svg').value = reader.result; run(); };
+  reader.readAsText(file);
+}
+$('drop').addEventListener('click', ()=>$('file').click());
+$('file').addEventListener('change', e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(ev=>$('drop').addEventListener(ev, e=>{e.preventDefault();$('drop').classList.add('hot');}));
+['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev, e=>{e.preventDefault();$('drop').classList.remove('hot');}));
+$('drop').addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+// allow dropping anywhere on the page too
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('drop', e=>{ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f && f.name.endsWith('.svg')) loadFile(f); });
+
+$('run').addEventListener('click', run);
+$('replay').addEventListener('click', ()=>{ if(polylines.length) play(); });
+$('sample').addEventListener('click', ()=>{ $('svg').value = SAMPLE; run(); });
+$('showtravel').addEventListener('change', ()=>{ if(!anim) redrawStatic(); });
+
+fitCanvas();
+$('svg').value = SAMPLE;
+run();
+</script>
+</body>
+</html>

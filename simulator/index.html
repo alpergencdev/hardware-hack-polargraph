@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Polargraph Simulator</title>
+<style>
+  :root { --bg:#0e1116; --panel:#171c24; --line:#2a313c; --ink:#e6edf3;
+          --muted:#8b97a7; --accent:#4da3ff; --pen:#36d399; --travel:#5a6473;
+          --cord:#c2862b; --anchor:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,sans-serif; background:var(--bg);
+         color:var(--ink); display:flex; height:100vh; overflow:hidden; }
+  .side { width:340px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+          padding:16px; overflow:auto; display:flex; flex-direction:column; gap:14px; }
+  .stage { flex:1; display:flex; flex-direction:column; min-width:0; }
+  h1 { font-size:15px; margin:0 0 2px; letter-spacing:.3px; }
+  .sub { color:var(--muted); font-size:12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  textarea { width:100%; height:96px; resize:vertical; background:#0b0e13; color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:8px; font:12px/1.4 monospace; }
+  .row { display:flex; gap:10px; }
+  .row > div { flex:1; }
+  input[type=number], select { width:100%; background:#0b0e13; color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:7px 8px; }
+  .checks { display:flex; gap:16px; align-items:center; }
+  .checks label { display:flex; gap:6px; align-items:center; margin:0; color:var(--ink); cursor:pointer; }
+  button { border:0; border-radius:8px; padding:9px 12px; font-weight:600; cursor:pointer; }
+  .primary { background:var(--accent); color:#02101f; }
+  .ghost { background:#222a35; color:var(--ink); }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
+  .drop { border:1.5px dashed var(--line); border-radius:10px; padding:12px; text-align:center;
+          color:var(--muted); cursor:pointer; transition:.15s; }
+  .drop.hot { border-color:var(--accent); color:var(--accent); background:#0b1622; }
+  .toolbar { display:flex; gap:12px; align-items:center; padding:10px 14px;
+             border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
+  .toolbar input[type=range] { width:110px; }
+  .spacer { flex:1; }
+  canvas { flex:1; width:100%; background:#0b0e13; display:block; cursor:default; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+  .dot { display:inline-block; width:10px; height:3px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+  .key { display:inline-block; width:9px; height:9px; border-radius:50%; vertical-align:middle; margin-right:5px; }
+  .stat { font-size:12px; color:var(--muted); white-space:pre-wrap; }
+  .err { color:#ff6b6b; }
+  .tele { font:12px/1.5 monospace; color:var(--ink); background:#0b0e13;
+          border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .tele b { color:var(--muted); font-weight:400; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  pre { margin:6px 0 0; max-height:120px; overflow:auto; background:#0b0e13;
+        border:1px solid var(--line); border-radius:8px; padding:8px; font-size:11px; }
+  .hint { font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+  <div class="side">
+    <div>
+      <h1>Polargraph Simulator</h1>
+      <div class="sub">SVG → painter → <b>controller logic</b> → two encoder motors</div>
+    </div>
+
+    <div class="drop" id="drop">Drop an <b>.svg</b> or <b>image</b> (PNG/JPG) here, or click to choose</div>
+    <input type="file" id="file" accept=".svg,image/svg+xml,image/*" hidden />
+
+    <div id="rasterbox" style="display:none">
+      <label>Image → line art</label>
+      <div class="row">
+        <div>
+          <label>Mode</label>
+          <select id="mode">
+            <option value="edge">edge (sketch)</option>
+            <option value="threshold">threshold (bold)</option>
+            <option value="centerline">centerline (single lines)</option>
+          </select>
+        </div>
+        <div>
+          <label>Max strokes (0=all)</label>
+          <input type="number" id="maxStrokes" value="0" min="0" />
+        </div>
+      </div>
+      <label>Detail <span id="detailval">50</span></label>
+      <input type="range" id="detail" min="0" max="100" value="50" style="width:100%" />
+      <div class="hint">Lower detail / fewer strokes = simpler drawing for busy
+        photos (e.g. a selfie). Adjusting these re-rasterizes the image.</div>
+    </div>
+
+    <div>
+      <label>SVG source</label>
+      <textarea id="svg" placeholder="&lt;svg ...&gt;...&lt;/svg&gt;"></textarea>
+    </div>
+
+    <div class="row">
+      <div><label>Drawing W (mm)</label><input type="number" id="w" value="300" min="1" /></div>
+      <div><label>Drawing H (mm)</label><input type="number" id="h" value="300" min="1" /></div>
+    </div>
+
+    <div class="row">
+      <div><label>Anchor spacing (mm)</label><input type="number" id="spacing" value="800" min="50" /></div>
+      <div><label>Spool ⌀ (mm)</label><input type="number" id="spoolD" value="12" min="1" /></div>
+    </div>
+    <div class="row">
+      <div><label>Ticks / rev</label><input type="number" id="ticksRev" value="360" min="1" /></div>
+      <div><label>Init cord (mm)</label><input type="number" id="initLen" value="500" min="1" /></div>
+    </div>
+    <div class="hint">Tip: drag either red motor on the canvas to change the
+      anchor spacing — it re-runs the controller automatically.</div>
+
+    <div class="checks">
+      <label><input type="checkbox" id="fit" checked /> Keep aspect</label>
+      <label><input type="checkbox" id="flip" /> Flip Y</label>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="run">Run simulation ▶</button>
+      <button class="ghost" id="sample">Load sample</button>
+      <button class="ghost" id="replay">Replay</button>
+    </div>
+
+    <div class="tele" id="tele">—</div>
+    <div class="stat" id="stat"></div>
+    <details>
+      <summary>controller log</summary>
+      <pre id="log"></pre>
+    </details>
+  </div>
+
+  <div class="stage">
+    <div class="toolbar">
+      <div class="legend">
+        <span><span class="key" style="background:var(--anchor)"></span>encoder motor</span>
+        <span><span class="dot" style="background:var(--cord)"></span>cord</span>
+        <span><span class="dot" style="background:var(--pen)"></span>pen down</span>
+        <span><span class="dot" style="background:var(--travel)"></span>pen up (travel)</span>
+      </div>
+      <div class="spacer"></div>
+      <label style="margin:0;color:var(--muted)">speed</label>
+      <input type="range" id="speed" min="1" max="100" value="55" />
+      <label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--ink)">
+        <input type="checkbox" id="showtravel" checked /> show travel
+      </label>
+      <label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--ink)">
+        <input type="checkbox" id="showcords" checked /> show cords
+      </label>
+    </div>
+    <canvas id="cv"></canvas>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+// Simulation result from the server (drives the real controller).
+let sim = null;            // {anchorSpacing,left,right,box,frames}
+let anim = null;
+let dragging = null;       // 'left' | 'right' while dragging an anchor
+
+const SAMPLE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="14" y="14" width="72" height="72" rx="8"/>
+  <circle cx="50" cy="50" r="24"/>
+  <path d="M30 54 Q50 78 70 54"/>
+  <circle cx="38" cy="42" r="4"/>
+  <circle cx="62" cy="42" r="4"/>
+</svg>`;
+
+// ── world<->screen transform ──────────────────────────────────────────────
+// World coords: x right, y DOWN (machine convention). Left motor at (0,0),
+// right at (spacing,0); pen hangs below at y>0. We fit the whole scene (both
+// anchors + every pen point) into the canvas with padding, y growing downward.
+function worldBounds() {
+  if (!sim) return {minX:0,minY:0,maxX:800,maxY:600};
+  let minX=Math.min(sim.left.x, sim.right.x), maxX=Math.max(sim.left.x, sim.right.x);
+  let minY=Math.min(sim.left.y, sim.right.y), maxY=Math.max(sim.left.y, sim.right.y);
+  for (const f of sim.frames){
+    minX=Math.min(minX,f.x); maxX=Math.max(maxX,f.x);
+    minY=Math.min(minY,f.y); maxY=Math.max(maxY,f.y);
+  }
+  // pad world box a touch so cords/pen aren't on the edge
+  const px=(maxX-minX)*0.08+10, py=(maxY-minY)*0.08+10;
+  return {minX:minX-px, minY:minY-py, maxX:maxX+px, maxY:maxY+py};
+}
+
+function transform() {
+  const r = cv.getBoundingClientRect();
+  const pad = 30;
+  const b = worldBounds();
+  const wW = b.maxX-b.minX || 1, wH = b.maxY-b.minY || 1;
+  const sw = r.width-pad*2, sh = r.height-pad*2;
+  const s = Math.min(sw/wW, sh/wH);
+  const ox = pad + (sw - wW*s)/2;
+  const oy = pad + (sh - wH*s)/2;
+  const fwd = p => [ox + (p[0]-b.minX)*s, oy + (p[1]-b.minY)*s];
+  const inv = q => [ (q[0]-ox)/s + b.minX, (q[1]-oy)/s + b.minY ];
+  return {fwd, inv, s};
+}
+
+function fitCanvas() {
+  const r = cv.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.floor(r.width*dpr));
+  cv.height = Math.max(1, Math.floor(r.height*dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  redrawStatic();
+}
+window.addEventListener('resize', fitCanvas);
+
+// ── drawing primitives ────────────────────────────────────────────────────
+function drawScene(uptoFrame, partial) {
+  const r = cv.getBoundingClientRect();
+  ctx.clearRect(0,0,r.width,r.height);
+  const T = transform();
+
+  // anchor line between the two motors
+  if (sim) {
+    const L = T.fwd([sim.left.x, sim.left.y]);
+    const R = T.fwd([sim.right.x, sim.right.y]);
+    ctx.strokeStyle = '#202833'; ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(L[0],L[1]); ctx.lineTo(R[0],R[1]); ctx.stroke();
+  }
+
+  // committed strokes up to uptoFrame
+  if (sim) {
+    const frames = sim.frames;
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    const showTravel = $('showtravel').checked;
+    for (let i=1;i<=uptoFrame && i<frames.length;i++){
+      const a = frames[i-1], c = frames[i];
+      // a segment is "drawn" only if the pen is down at its END.
+      if (c.pen===1){
+        ctx.strokeStyle = '#36d399'; ctx.lineWidth = 2; ctx.setLineDash([]);
+      } else {
+        if (!showTravel) continue;
+        ctx.strokeStyle = '#5a6473'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+      }
+      const pa = T.fwd([a.x,a.y]), pc = T.fwd([c.x,c.y]);
+      ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pc[0],pc[1]); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // current pen position + live cords
+    const cur = frames[Math.min(uptoFrame, frames.length-1)] || frames[0];
+    if (cur){
+      const P = T.fwd([cur.x,cur.y]);
+      if ($('showcords').checked){
+        const L = T.fwd([sim.left.x, sim.left.y]);
+        const R = T.fwd([sim.right.x, sim.right.y]);
+        ctx.strokeStyle = '#c2862b'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(L[0],L[1]); ctx.lineTo(P[0],P[1]);
+        ctx.moveTo(R[0],R[1]); ctx.lineTo(P[0],P[1]); ctx.stroke();
+      }
+      // pen head — filled if down, ring if up
+      ctx.beginPath(); ctx.arc(P[0],P[1], 5, 0, Math.PI*2);
+      if (cur.pen===1){ ctx.fillStyle='#36d399'; ctx.fill(); }
+      else { ctx.strokeStyle='#8b97a7'; ctx.lineWidth=2; ctx.stroke(); }
+      updateTele(cur);
+    }
+  }
+
+  // motors on top (draggable)
+  if (sim){
+    for (const m of [['left',sim.left],['right',sim.right]]){
+      const P = T.fwd([m[1].x, m[1].y]);
+      ctx.beginPath(); ctx.arc(P[0],P[1], 9, 0, Math.PI*2);
+      ctx.fillStyle = dragging===m[0] ? '#ff9a9a' : '#ff6b6b'; ctx.fill();
+      ctx.strokeStyle='#0b0e13'; ctx.lineWidth=2; ctx.stroke();
+      ctx.fillStyle='#e6edf3'; ctx.font='11px system-ui';
+      ctx.fillText(m[0]==='left'?'L':'R', P[0]-3, P[1]+4);
+    }
+  }
+}
+
+function redrawStatic(){ drawScene(sim ? sim.frames.length-1 : 0, false); }
+
+function updateTele(f){
+  $('tele').innerHTML =
+    `<b>pen</b>  x ${f.x.toFixed(1)}  y ${f.y.toFixed(1)}  ` +
+    (f.pen ? '<span style="color:#36d399">down</span>' : '<span style="color:#8b97a7">up</span>') +
+    `\n<b>cord</b> L ${f.L.toFixed(1)}  R ${f.R.toFixed(1)} mm` +
+    `\n<b>ticks</b> L ${f.lp}  R ${f.rp}`;
+}
+
+// ── animated playback ─────────────────────────────────────────────────────
+function play(){
+  if (anim) cancelAnimationFrame(anim);
+  if (!sim || !sim.frames.length) return;
+  let i = 0, acc = 0;
+  function step(){
+    const speed = +$('speed').value;             // 1..100
+    acc += 0.5 + speed/4;                          // frames advanced per tick
+    i = Math.min(sim.frames.length-1, Math.floor(acc));
+    drawScene(i, true);
+    if (i < sim.frames.length-1) anim = requestAnimationFrame(step);
+    else anim = null;
+  }
+  step();
+}
+
+// When an image is loaded we keep its base64 here; the server re-rasterizes it
+// (so tweaking detail/mode/max-strokes re-runs live). Cleared for SVG input.
+let pendingImage = null;
+
+// ── run the controller pipeline on the server ─────────────────────────────
+async function run(){
+  const svg = $('svg').value.trim();
+  if (!pendingImage && !svg){ setErr('Paste or drop an SVG or image first.'); return; }
+  $('stat').className='stat';
+  $('stat').textContent = pendingImage ? 'rasterizing + running controller…'
+                                       : 'running controller…';
+  try {
+    const body = {
+      width:+$('w').value, height:+$('h').value,
+      fit:$('fit').checked, flipY:$('flip').checked,
+      spacing:+$('spacing').value, spoolD:+$('spoolD').value,
+      ticksRev:+$('ticksRev').value, initLen:+$('initLen').value,
+    };
+    if (pendingImage){
+      body.image = pendingImage;
+      body.mode = $('mode').value;
+      body.detail = +$('detail').value;
+      body.maxStrokes = +$('maxStrokes').value;
+    } else {
+      body.svg = svg;
+    }
+    const res = await fetch('/simulate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.error){ setErr(data.error); $('log').textContent=''; return; }
+    sim = data;
+    if (data.svg) $('svg').value = data.svg;   // show the rasterized SVG
+    $('spacing').value = sim.anchorSpacing;     // reflect what the sim used
+    $('log').textContent = data.log || '';
+    const down = sim.frames.filter(f=>f.pen).length;
+    $('stat').className='stat';
+    $('stat').textContent =
+      `${sim.frames.length} controller steps · ${down} pen-down · `+
+      `spacing ${sim.anchorSpacing}mm`;
+    play();
+  } catch(e){ setErr(String(e)); }
+}
+function setErr(m){ $('stat').className='stat err'; $('stat').textContent=m; }
+
+// ── drag an anchor to change its location → re-run controller ─────────────
+function anchorAt(mx, my){
+  if (!sim) return null;
+  const T = transform();
+  for (const m of [['left',sim.left],['right',sim.right]]){
+    const P = T.fwd([m[1].x, m[1].y]);
+    if (Math.hypot(P[0]-mx, P[1]-my) <= 12) return m[0];
+  }
+  return null;
+}
+function evtPos(e){
+  const r = cv.getBoundingClientRect();
+  return [e.clientX-r.left, e.clientY-r.top];
+}
+cv.addEventListener('mousemove', e=>{
+  const [mx,my]=evtPos(e);
+  if (dragging){
+    const T = transform();
+    const [wx] = T.inv([mx,my]);
+    // Anchors live on the y=0 line; dragging changes spacing only. Keep left at
+    // 0 and let the dragged one set the spacing (clamped sane).
+    if (dragging==='right'){
+      const sp = Math.max(50, Math.round(wx));
+      $('spacing').value = sp; sim.right.x = sp; sim.anchorSpacing = sp;
+    } else {
+      // dragging left moves left along x; spacing = right.x - left.x.
+      const lx = Math.min(sim.right.x-50, Math.round(wx));
+      sim.left.x = lx;
+    }
+    redrawStatic();
+  } else {
+    cv.style.cursor = anchorAt(mx,my) ? 'grab' : 'default';
+  }
+});
+cv.addEventListener('mousedown', e=>{
+  const [mx,my]=evtPos(e);
+  const hit = anchorAt(mx,my);
+  if (hit){ dragging=hit; cv.style.cursor='grabbing'; }
+});
+window.addEventListener('mouseup', ()=>{
+  if (dragging){
+    dragging=null; cv.style.cursor='default';
+    // Re-run the controller with the new geometry. We normalize so the left
+    // motor is the origin (the sim always anchors left at 0).
+    const sp = Math.round(sim.right.x - sim.left.x);
+    $('spacing').value = Math.max(50, sp);
+    run();
+  }
+});
+
+// ── file / drag-drop ──────────────────────────────────────────────────────
+// SVG files load as text into the SVG box; raster images load as base64 and
+// switch the panel into "image" mode (showing the detail controls).
+function isSvgFile(file){
+  return file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
+}
+function loadFile(file){
+  if (isSvgFile(file)){
+    pendingImage = null;
+    $('rasterbox').style.display = 'none';
+    const reader = new FileReader();
+    reader.onload = ()=>{ $('svg').value = reader.result; run(); };
+    reader.readAsText(file);
+  } else {
+    // raster image → keep the data URL, reveal controls, let the server convert
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      pendingImage = reader.result;          // data:...;base64,xxxx
+      $('rasterbox').style.display = '';
+      run();
+    };
+    reader.readAsDataURL(file);
+  }
+}
+$('drop').addEventListener('click', ()=>$('file').click());
+$('file').addEventListener('change', e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(ev=>$('drop').addEventListener(ev, e=>{e.preventDefault();$('drop').classList.add('hot');}));
+['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev, e=>{e.preventDefault();$('drop').classList.remove('hot');}));
+$('drop').addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('drop', e=>{ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+
+// Editing the SVG box by hand means the user is back to SVG input.
+$('svg').addEventListener('input', ()=>{
+  if (pendingImage){ pendingImage=null; $('rasterbox').style.display='none'; }
+});
+
+// Rasterize controls: re-run (re-rasterize) whenever they change.
+$('detail').addEventListener('input', ()=>{ $('detailval').textContent = $('detail').value; });
+$('detail').addEventListener('change', ()=>{ if(pendingImage) run(); });
+$('mode').addEventListener('change', ()=>{ if(pendingImage) run(); });
+$('maxStrokes').addEventListener('change', ()=>{ if(pendingImage) run(); });
+
+$('run').addEventListener('click', run);
+$('replay').addEventListener('click', ()=>{ if(sim) play(); });
+$('sample').addEventListener('click', ()=>{ pendingImage=null; $('rasterbox').style.display='none'; $('svg').value = SAMPLE; run(); });
+$('showtravel').addEventListener('change', ()=>{ if(!anim) redrawStatic(); });
+$('showcords').addEventListener('change', ()=>{ if(!anim) redrawStatic(); });
+
+fitCanvas();
+$('svg').value = SAMPLE;
+run();
+</script>
+</body>
+</html>
