@@ -230,8 +230,8 @@ int main(int argc, char **argv) {
   // very first stroke's first point so initial cord lengths are sane. We give
   // both encoders the same calibration; their differing cord lengths come from
   // geometry, not calibration.
-  EncoderState left(spoolD, ticksRev, initLen, 0);
-  EncoderState right(spoolD, ticksRev, initLen, 0);
+  StepperState left(spoolD, ticksRev, initLen, 0);
+  StepperState right(spoolD, ticksRev, initLen, 0);
 
   // Seed the encoders so the pen actually starts at the first point. We compute
   // the cord lengths for that point and convert to tick positions, the same way

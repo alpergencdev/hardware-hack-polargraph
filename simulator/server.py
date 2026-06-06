@@ -71,13 +71,22 @@ def run_rasterize(image_bytes, mode="edge", detail=50, max_strokes=0):
     return proc.stdout.decode("utf-8"), log
 
 
-def run_painter(svg, width, height, fit=True, flip_y=False):
-    """SVG -> polyline JSON (bytes) via ./painter."""
+def run_painter(svg, width, height, fit=True, flip_y=False, single_line=False,
+                start=None):
+    """SVG -> polyline JSON (bytes) via ./painter.
+
+    `start`: optional (x, y) in SOURCE/SVG coordinates for the single-line start.
+    When omitted, painter defaults to the drawing's top-left-most point.
+    """
     args = [PAINTER, "--width", str(width), "--height", str(height)]
     if not fit:
         args.append("--no-fit")
     if flip_y:
         args.append("--flip-y")
+    if single_line:
+        args.append("--single-line")
+        if start is not None:
+            args += ["--start", str(start[0]), str(start[1])]
     proc = subprocess.run(
         args, input=svg.encode("utf-8"),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -151,12 +160,19 @@ class Handler(BaseHTTPRequestHandler):
                     max_strokes=req.get("maxStrokes", 0),
                 )
 
+            # Optional single-line start (source coords): {startX, startY}. If
+            # absent, painter uses the drawing's top-left-most point.
+            start = None
+            if req.get("startX") is not None and req.get("startY") is not None:
+                start = (req["startX"], req["startY"])
             polys, plog = run_painter(
                 svg,
                 req.get("width", 300),
                 req.get("height", 300),
                 fit=req.get("fit", True),
                 flip_y=req.get("flipY", False),
+                single_line=req.get("singleLine", False),
+                start=start,
             )
             result, slog = run_sim(
                 polys,

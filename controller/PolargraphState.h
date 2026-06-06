@@ -12,8 +12,8 @@ const float SEGMENT_LENGTH_MM = 1.0;
 // All polargraph kinematics. Pure math + state — no Arduino dependency, so this
 // can be driven directly from a simulation (feed setPosition, read getCoordinates).
 class PolargraphState {
-  EncoderState left_encoder;
-  EncoderState right_encoder;
+  StepperState left_encoder;
+  StepperState right_encoder;
   int anchor_spacing_mm;
 
   // Logical pen position the firmware is tracking, in the same (x, y)
@@ -22,7 +22,7 @@ class PolargraphState {
   float pen_y;
 
  public:
-  PolargraphState(EncoderState left_encoder, EncoderState right_encoder, int anchor_spacing_mm)
+  PolargraphState(StepperState left_encoder, StepperState right_encoder, int anchor_spacing_mm)
       : left_encoder(left_encoder),
         right_encoder(right_encoder),
         anchor_spacing_mm(anchor_spacing_mm) {

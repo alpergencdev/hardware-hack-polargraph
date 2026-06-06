@@ -107,6 +107,15 @@
     <div class="checks">
       <label><input type="checkbox" id="fit" checked /> Keep aspect</label>
       <label><input type="checkbox" id="flip" /> Flip Y</label>
+      <label><input type="checkbox" id="singleLine" /> Single line</label>
+    </div>
+
+    <div id="startbox" style="display:none">
+      <label>Single-line start (SVG coords — blank = top-left)</label>
+      <div class="row">
+        <div><input type="number" id="startX" placeholder="auto (left)" /></div>
+        <div><input type="number" id="startY" placeholder="auto (top)" /></div>
+      </div>
     </div>
 
     <div class="btns">
@@ -308,9 +317,16 @@ async function run(){
     const body = {
       width:+$('w').value, height:+$('h').value,
       fit:$('fit').checked, flipY:$('flip').checked,
+      singleLine:$('singleLine').checked,
       spacing:+$('spacing').value, spoolD:+$('spoolD').value,
       ticksRev:+$('ticksRev').value, initLen:+$('initLen').value,
     };
+    // Single-line start (SVG coords). Only send if BOTH fields are filled;
+    // otherwise the server defaults to the drawing's top-left-most point.
+    if ($('singleLine').checked && $('startX').value !== '' && $('startY').value !== '') {
+      body.startX = +$('startX').value;
+      body.startY = +$('startY').value;
+    }
     if (pendingImage){
       body.image = pendingImage;
       body.mode = $('mode').value;
@@ -431,6 +447,14 @@ $('detail').addEventListener('input', ()=>{ $('detailval').textContent = $('deta
 $('detail').addEventListener('change', ()=>{ if(pendingImage) run(); });
 $('mode').addEventListener('change', ()=>{ if(pendingImage) run(); });
 $('maxStrokes').addEventListener('change', ()=>{ if(pendingImage) run(); });
+// Single-line is a meaningful re-plot; re-run if we already have input loaded.
+$('singleLine').addEventListener('change', ()=>{
+  $('startbox').style.display = $('singleLine').checked ? '' : 'none';
+  if(pendingImage || $('svg').value.trim()) run();
+});
+// Re-run when an explicit single-line start is edited (only matters in that mode).
+$('startX').addEventListener('change', ()=>{ if($('singleLine').checked && (pendingImage || $('svg').value.trim())) run(); });
+$('startY').addEventListener('change', ()=>{ if($('singleLine').checked && (pendingImage || $('svg').value.trim())) run(); });
 
 $('run').addEventListener('click', run);
 $('replay').addEventListener('click', ()=>{ if(sim) play(); });
