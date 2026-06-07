@@ -61,14 +61,47 @@
     </div>
 
     <div class="row">
-      <div><label>Width</label><input type="number" id="w" value="600" min="1" /></div>
-      <div><label>Height</label><input type="number" id="h" value="400" min="1" /></div>
+      <div><label>Width</label><input type="number" id="w" value="40" min="1" /></div>
+      <div><label>Height</label><input type="number" id="h" value="40" min="1" /></div>
     </div>
 
     <div class="checks">
       <label><input type="checkbox" id="fit" checked /> Keep aspect (fit)</label>
       <label><input type="checkbox" id="flip" /> Flip Y</label>
     </div>
+
+    <details style="border:1px solid var(--line);border-radius:8px;padding:8px">
+      <summary>Plotter config (applies to the next run)</summary>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label>Start position entered as</label>
+          <select id="startMode" style="width:100%;background:#0b0e13;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 8px">
+            <option value="xy">X / Y coordinates (mm)</option>
+            <option value="cord">Cord lengths: left / right (mm)</option>
+          </select>
+        </div>
+        <div class="row" id="xyInputs">
+          <div><label>Start X</label><input type="number" id="startX" value="250" step="any" /></div>
+          <div><label>Start Y</label><input type="number" id="startY" value="150" step="any" /></div>
+        </div>
+        <div class="row" id="cordInputs" style="display:none">
+          <div><label>Left cord</label><input type="number" id="startLeft" value="291.5" step="any" /></div>
+          <div><label>Right cord</label><input type="number" id="startRight" value="291.5" step="any" /></div>
+        </div>
+        <div><label>Motor speed (RPM, 1–30)</label><input type="number" id="speed" value="10" min="1" max="30" /></div>
+        <button class="ghost" id="saveCfg">Save config</button>
+        <div class="stat" id="cfgStat"></div>
+
+        <hr style="border:none;border-top:1px solid var(--line);margin:4px 0" />
+        <label>Jog: physically move the pen to a point (motors run)</label>
+        <div class="row">
+          <div><label>Move to X</label><input type="number" id="jogX" value="250" step="any" /></div>
+          <div><label>Move to Y</label><input type="number" id="jogY" value="150" step="any" /></div>
+        </div>
+        <button class="primary" id="jogBtn" style="background:var(--accent)">Move pen here ⤳</button>
+        <div class="stat" id="jogStat"></div>
+      </div>
+    </details>
 
     <div class="btns">
       <button class="primary" id="run">Run painter ▶</button>
@@ -308,6 +341,63 @@ async function pollStatus() {
 function setPlot(msg, isErr){ $('plotter').className = isErr ? 'stat err' : 'stat'; $('plotter').textContent = msg; }
 
 $('send').addEventListener('click', send);
+
+// ---- plotter config: start position (X/Y or cord lengths) + motor speed ----
+// Toggle which start inputs are shown based on the selected mode.
+function syncStartMode() {
+  const cord = $('startMode').value === 'cord';
+  $('xyInputs').style.display = cord ? 'none' : '';
+  $('cordInputs').style.display = cord ? '' : 'none';
+}
+$('startMode').addEventListener('change', syncStartMode);
+syncStartMode();
+
+async function saveConfig() {
+  const cfg = {
+    start_mode: $('startMode').value,
+    start_x: +$('startX').value, start_y: +$('startY').value,
+    start_left: +$('startLeft').value, start_right: +$('startRight').value,
+    speed: +$('speed').value,
+  };
+  $('cfgStat').className = 'stat'; $('cfgStat').textContent = 'saving…';
+  try {
+    const data = await (await fetch('/config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(cfg)
+    })).json();
+    if (data.error) { $('cfgStat').className='stat err'; $('cfgStat').textContent = data.error; return; }
+    const c = data.config;
+    const start = c.start_mode === 'cord'
+      ? `cords L=${c.start_left} R=${c.start_right}`
+      : `X=${c.start_x} Y=${c.start_y}`;
+    $('cfgStat').textContent = `saved · start ${start} · ${c.speed} RPM (next run)`;
+  } catch (e) { $('cfgStat').className='stat err'; $('cfgStat').textContent = String(e); }
+}
+$('saveCfg').addEventListener('click', saveConfig);
+
+// ---- jog: physically move the pen to (x,y) ----
+async function jog() {
+  const x = +$('jogX').value, y = +$('jogY').value;
+  $('jogStat').className = 'stat'; $('jogStat').textContent = `moving pen to (${x}, ${y})…`;
+  try {
+    const data = await (await fetch('/jog', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({x, y})
+    })).json();
+    if (data.error) { $('jogStat').className='stat err'; $('jogStat').textContent = data.error; return; }
+    // Poll status: a jog is a 1-point path, done when drawn >= total.
+    const tick = async () => {
+      const s = await (await fetch('/status')).json();
+      if (s.has_path && s.drawn >= s.total && s.total > 0) {
+        $('jogStat').textContent = `pen moved to (${x}, ${y}) ✓ — it's now the start`;
+      } else {
+        setTimeout(tick, 400);
+      }
+    };
+    setTimeout(tick, 400);
+  } catch (e) { $('jogStat').className='stat err'; $('jogStat').textContent = String(e); }
+}
+$('jogBtn').addEventListener('click', jog);
 
 fitCanvas();
 $('svg').value = SAMPLE;
