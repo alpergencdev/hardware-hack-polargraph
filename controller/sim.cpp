@@ -46,7 +46,7 @@
 #include <string>
 #include <vector>
 
-#include "EncoderState.h"
+#include "StepperState.h"
 #include "Geometry.h"
 #include "PolargraphState.h"
 

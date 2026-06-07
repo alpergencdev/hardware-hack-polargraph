@@ -49,7 +49,7 @@
   <div class="side">
     <div>
       <h1>Painter UI</h1>
-      <div class="sub">SVG → ./painter → animated strokes</div>
+      <div class="sub">SVG → ./painter → preview, or send to the WiFi plotter</div>
     </div>
 
     <div class="drop" id="drop">Drop an .svg here, or click to choose</div>
@@ -75,6 +75,11 @@
       <button class="ghost" id="sample">Load sample</button>
       <button class="ghost" id="replay">Replay</button>
     </div>
+
+    <div class="btns">
+      <button class="primary" id="send" style="background:var(--pen);flex:1">Send to plotter 🖊</button>
+    </div>
+    <div class="stat" id="plotter"></div>
 
     <div class="stat" id="stat"></div>
     <details>
@@ -263,6 +268,46 @@ $('run').addEventListener('click', run);
 $('replay').addEventListener('click', ()=>{ if(polylines.length) play(); });
 $('sample').addEventListener('click', ()=>{ $('svg').value = SAMPLE; run(); });
 $('showtravel').addEventListener('change', ()=>{ if(!anim) redrawStatic(); });
+
+// ---- send to plotter: publish a single-line path the ESP32 will fetch ----
+async function send() {
+  const svg = $('svg').value.trim();
+  if (!svg) { setPlot('Paste or drop an SVG first.', true); return; }
+  const width = +$('w').value, height = +$('h').value;
+  setPlot('publishing single-line path…');
+  try {
+    const res = await fetch('/publish', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({svg, width, height, fit:$('fit').checked, flipY:$('flip').checked})
+    });
+    const data = await res.json();
+    if (data.error) { setPlot(data.error, true); return; }
+    // Preview exactly what was sent (single continuous line).
+    polylines = data.polylines || [];
+    lastBox = {w:width, h:height};
+    play();
+    setPlot(`sent ${data.points} points (v${data.version}). waiting for plotter…`);
+    pollStatus();
+  } catch (e) { setPlot(String(e), true); }
+}
+
+let statusTimer = null;
+async function pollStatus() {
+  if (statusTimer) clearTimeout(statusTimer);
+  try {
+    const s = await (await fetch('/status')).json();
+    if (s.has_path && s.total) {
+      const pct = Math.round(100 * s.drawn / s.total);
+      const done = s.drawn >= s.total;
+      setPlot(`plotter: ${s.drawn}/${s.total} points (${pct}%)${done ? ' ✓ complete' : ' …drawing'}`);
+      if (!done) statusTimer = setTimeout(pollStatus, 500);
+    }
+  } catch (e) { /* server gone; stop polling quietly */ }
+}
+
+function setPlot(msg, isErr){ $('plotter').className = isErr ? 'stat err' : 'stat'; $('plotter').textContent = msg; }
+
+$('send').addEventListener('click', send);
 
 fitCanvas();
 $('svg').value = SAMPLE;

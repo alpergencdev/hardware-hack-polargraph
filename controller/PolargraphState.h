@@ -2,7 +2,7 @@
 
 #include <math.h>  // sqrt — works both on Arduino and in off-hardware sims
 
-#include "EncoderState.h"
+#include "StepperState.h"
 #include "Geometry.h"
 
 // Max straight-line distance (mm) the pen travels per interpolated segment.

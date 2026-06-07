@@ -15,7 +15,7 @@ PAINTER     := painter
 SIM         := sim
 PAINTER_SRC := controller/painter.cpp
 SIM_SRC     := controller/sim.cpp
-SIM_DEPS    := controller/EncoderState.h controller/PolargraphState.h controller/Geometry.h
+SIM_DEPS    := controller/StepperState.h controller/PolargraphState.h controller/Geometry.h
 
 .PHONY: all tools clean firmware upload monitor sim-ui ui help
 
